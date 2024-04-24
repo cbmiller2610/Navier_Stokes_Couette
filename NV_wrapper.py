@@ -40,9 +40,11 @@ xi_grid,eta_grid = np.meshgrid(xi_vec,eta_vec,indexing='ij')
 
 #Initial Conditions
 
-IC_func = np.vectorize(initial_cond)
-rho, T = IC_func(x_grid)
-u = 
+rho = np.ones(xi_div,eta_div)
+u = np.zeros(xi_div,eta_div)
+u[
+e = np.full((xi_div,eta_div), (0.1712*519)/(3350^2))
+
 g = 1.4
 
 P_stor = np.empty((xi_div, eta_div, 5, tsteps+1)) #store rho, u, v, p, and T values
