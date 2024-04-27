@@ -3,11 +3,6 @@ import pdb
 #from ctypes import *
 import timeit
 
-def initial_cond(xi):
-    rho = 1 
-    T = 1
-    return rho, T
-
 def U_to_prim(U, xi_div, eta_div):
     #returns rho, u, v, and p primitive variable arrays
     U1 = U[:, :, 0]
@@ -22,6 +17,32 @@ def U_to_prim(U, xi_div, eta_div):
     U_step[:, :, 3] = (g - 1) * (U4 - (U2**2 + U3**2) / (2*U1))) #pressure
     U_step[:, :, 4] = U4 / U1 - ((U2**2 + U3**2) / (2*U1**2)) #temperature
     return U_step
+#calculate viscous terms in the interior nodes
+def viscous_pred_E(mu,u,v,Reh,deta,dxi):
+    tauxx = ((2*mu)/(3*Reh))*(2*((u[1:-1,1:-1]-u[0:-2,1:-1])/dxi)-((v[1:-1,2:]-v[1:-1,0:-2])/(2*deta)))
+    tauxy = (mu/Reh)*(((u[1:-1,2:]-u[1:-1,0:-2])/(2*deta))+((v[1:-1,1:-1]-v[0:-2,1:-1])/dxi))
+    return tauxx, tauxy
+
+def viscous_corr_E(mu,u,v,Reh,deta,dxi):
+    tauxx = ((2*mu)/(3*Reh))*(2*((u[2:,1:-1]-u[1:-1,1:-1])/dxi)-((v[1:-1,2:]-v[1:-1,0:-2])/(2*deta)))
+    tauxy = (mu/Reh)*(((u[1:-1,2:]-u[1:-1,0:-2])/(2*deta))+((v[2:,1:-1]-v[1:-1,1:-1])/dxi))
+    return tauxx, tauxy
+
+def viscous_pred_F(mu,u,v,Reh,deta,dxi):
+    tauxy = (mu/Reh)*(((u[1:-1,1:-1]-u[1:-1,0:-2])/(deta))+((v[2:,1:-1]-v[0:-2,1:-1])/(2*dxi)))
+    tauyy = ((2*mu)/(3*Reh))*(2*((v[1:-1,1:-1]-v[1:-1,0:-2])/(deta))-((u[2:,1:-1]-u[0:-2,1:-1])/(2*dxi))) 
+    return tauxy, tauyy
+
+def viscous_corr_F(mu,u,v,Reh,deta,dxi):
+    tauxy = (mu/Reh)*(((u[1:-1,2:]-u[1:-1,1:-1])/(deta))+((v[2:,1:-1]-v[0:-2,1:-1])/(2*dxi)))
+    tauyy = ((2*mu)/(3*Reh))*(2*((v[1:-1,2:]-v[1:-1,1:-1])/(deta))-((u[2:,1:-1]-u[0:-2,1:-1])/(2*dxi)))
+    return tauxy, tauyy
+
+#calculate vector components
+def prim_to_U(rho,u,v,t)
+def prim_to_F(rho,u,v,T,p,tauxy,tauyy)
+def prim_to_E(rho,u,v,T,p):
+    return E_step
 #Gridding Inputs
 xi_max = 10
 eta_max = 1
@@ -42,8 +63,13 @@ xi_grid,eta_grid = np.meshgrid(xi_vec,eta_vec,indexing='ij')
 
 rho = np.ones(xi_div,eta_div)
 u = np.zeros(xi_div,eta_div)
-u[
-e = np.full((xi_div,eta_div), (0.1712*519)/(3350^2))
+u[:,-1] = np.ones(xi_div)
+v = np.zeros(xi_div,eta_div)
+T = np.full((xi_div,eta_div),1)
+p = rho*T
+mu = np.ones(xi_div,eta_div)
+Reh = 17742.1
+
 
 g = 1.4
 
