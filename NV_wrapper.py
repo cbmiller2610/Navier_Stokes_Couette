@@ -121,8 +121,11 @@ for i in range(1,tsteps):
     v0 = U_np_3D[0, :, 2] / U_np_3D[0, :, 0]
     U_np_3D[0, :, 3] = rho_inlet * (T_inlet / (g - 1) + (g / 2) * (u0**2 + v0**2))
 
-    #right boundary, supersonic outlet, all quantities float
+    #All quantities float and right and left boundaries (infinite plate) (y velocity forced to zero however)
     U_np_3D[-1, :, :] = 2 * U_np_3D[-2, :, :] - U_np_3D[-3, :, :]
+    U_np_3D[-1, :, 2] = 0
+    U_np_3D[
+
     #Wall and symmetry boundaries (update ghosts)
     #Lower Boundary
     Ughosts[:, 0, :] = U_np_3D[1:-1, 1, :]
