@@ -42,7 +42,7 @@ def init_grid(config):
     u = np.full((x_div,y_div),0.001)
     u[:,-1] = np.ones(x_div)
     v = np.full((x_div,y_div),0.001)
-    T = np.full((x_div,y_div),1)
+    T = np.ones((x_div,y_div))
     p = rho*T
     mu = np.ones((x_div,y_div))
 
@@ -60,7 +60,7 @@ def init_grid(config):
     return grid,flow
 
 def calc_tstep(grid,flow):
-    sigma = 0.9
+    sigma = 0.6
     a = np.sqrt((flow['g']*flow['p'])/flow['rho'])
     dt_CFL = (
             (abs(flow['u'])/grid['dx']) + (abs(flow['v'])/grid['dy'])+
@@ -72,6 +72,7 @@ def calc_tstep(grid,flow):
     Re_min = np.minimum(Rex,Rey)
 
     dt = np.min((sigma*dt_CFL[1:-1,1:-1])/(1+2/Re_min[1:-1,1:-1]))
+    dt = 0.01
     return dt
 
 def mac_predictor(grid,flow,dt):
@@ -83,79 +84,160 @@ def mac_predictor(grid,flow,dt):
     E_np_3D = encode_E(flow,qE,tauxx,tauxy_E,grid)
     F_np_3D = encode_F(flow,qF,tauxy_F,tauyy,grid)
 
-    Upred = (U_np_3D[1:-1, 1:-1, :]
+    U_np_3D[1:-1,1:-1,:] = (U_np_3D[1:-1, 1:-1, :]
                             - (dt / grid['dx']) * (E_np_3D[2:, 1:-1, :] - E_np_3D[1:-1, 1:-1, :])
                             - (dt / grid['dy']) * (F_np_3D[1:-1, 2:, :] - F_np_3D[1:-1, 1:-1, :]))
-
-    flow_out = decode_U(U_pred,flow)
+    print("in pred")
+    pdb.set_trace()
+    flow_out = decode_U(U_np_3D,flow)
     return flow_out
 
 def mac_corrector(grid,flow,dt):
-    U_np_3D = encode_U(flow)
+    U_np_3D = encode_U(flow,grid)
     qE = heat_trans_corr_E(grid,flow)
     qF = heat_trans_corr_F(grid,flow)
     tauxx,tauxy_E = viscous_corr_E(grid,flow)
     tauxy_F,tauyy = viscous_corr_F(grid,flow)
-    E_np_3D = encode_E(flow,qE,tauxx,tauxy_E)
-    F_np_3D = encode_F(flow,qF,tauxy_F,tauyy)
+    E_np_3D = encode_E(flow,qE,tauxx,tauxy_E,grid)
+    F_np_3D = encode_F(flow,qF,tauxy_F,tauyy,grid)
 
-    U_corr = (U_np_3D[1:-1, 1:-1, :]
+    U_np_3D[1:-1,1:-1,:] = (U_np_3D[1:-1, 1:-1, :]
                                  - (dt / grid['dx']) * (E_np_3D[1:-1, 1:-1, :] - E_np_3D[0:-2, 1:-1, :])
                                  - (dt / grid['dy']) * (F_np_3D[1:-1, 1:-1, :] - F_np_3D[1:-1, 0:-2, :]))
-    flow_out = decode_U(U_corr,flow)
+    flow_out = decode_U(U_np_3D,flow)
     return flow_out
 
 def mac_combine(grid,flow_pred,flow_corr):
-    U_pred = encode_U(flow_pred)
-    U_corr = encode_U(flow_corr)
+    U_pred = encode_U(flow_pred,grid)
+    U_corr = encode_U(flow_corr,grid)
 
-    U_final = 0.5*(U_pred[1:-1,1:-1]+U_corr[1:-1,1:-1])
+    U_final = 0.5*(U_pred+U_corr)
 
-    flow_out = decode_U(U_final,flow)
+    flow_out = decode_U(U_final,flow_corr)
     return flow_out
 
 def viscous_pred_E(grid,flow):
+    dudx = np.empty((grid['x_div'], grid['y_div']))
+    dudy = np.empty((grid['x_div'], grid['y_div']))
+    dvdx = np.empty((grid['x_div'], grid['y_div']))
+    dvdy = np.empty((grid['x_div'], grid['y_div']))
     u = flow['u']
     v = flow['v']
     mu = flow['mu']
     Reh = flow['Reh']
     dxi = grid['dx']
     deta = grid['dy']
-    tauxx = ((2*mu[1:-1,1:-1])/(3*Reh))*(2*((u[1:-1,1:-1]-u[0:-2,1:-1])/dxi)-((v[1:-1,2:]-v[1:-1,0:-2])/(2*deta)))
-    tauxy = (mu[1:-1,1:-1]/Reh)*(((u[1:-1,2:]-u[1:-1,0:-2])/(2*deta))+((v[1:-1,1:-1]-v[0:-2,1:-1])/dxi))
+
+    dudx[1:,:] = ((u[1:,:]-u[0:-1,:])/dxi)#rear diff
+    dudx[0,:] = ((u[1,:]-u[0,:])/dxi)# fwd diff at left boundary only
+
+    dvdx[1:,:] = ((v[1:,:]-v[0:-1,:])/dxi)#rear diff
+    dvdx[0,:] = ((v[1,:]-v[0,:])/dxi)# fwd diff at left boundary only
+
+    dudy[:,1:-1] = ((u[:,2:]-u[:,0:-2])/(2*deta)) #central diff
+    dudy[:,0] = ((u[:,1]-u[:,0])/(deta)) #fwd diff at boundary only
+    dudy[:,-1] = ((u[:,-1]-u[:,-2])/(deta)) #rear diff at boundary only
+
+    dvdy[:,1:-1] = ((v[:,2:]-v[:,0:-2])/(2*deta)) #central diff
+    dvdy[:,0] = ((v[:,1]-v[:,0])/(deta)) #fwd diff at boundary only
+    dvdy[:,-1] = ((v[:,-1]-v[:,-2])/(deta)) #rear diff at boundary only
+
+    tauxx = ((2*mu)/(3*Reh))*(2*dudx-dvdy)
+    tauxy =  (mu/Reh)*(dudy+dvdx)
+    
     return tauxx, tauxy
 
 def viscous_corr_E(grid,flow):
+    dudx = np.empty((grid['x_div'], grid['y_div']))
+    dudy = np.empty((grid['x_div'], grid['y_div']))
+    dvdx = np.empty((grid['x_div'], grid['y_div']))
+    dvdy = np.empty((grid['x_div'], grid['y_div']))
     u = flow['u']
     v = flow['v']
     mu = flow['mu']
     Reh = flow['Reh']
     dxi = grid['dx']
     deta = grid['dy']
-    tauxx = ((2*mu[1:-1,1:-1])/(3*Reh))*(2*((u[2:,1:-1]-u[1:-1,1:-1])/dxi)-((v[1:-1,2:]-v[1:-1,0:-2])/(2*deta)))
-    tauxy = (mu[1:-1,1:-1]/Reh)*(((u[1:-1,2:]-u[1:-1,0:-2])/(2*deta))+((v[2:,1:-1]-v[1:-1,1:-1])/dxi))
+
+    dudx[0:-1,:] = ((u[1:,:]-u[0:-1,:])/dxi)#fwd diff
+    dudx[-1,:] = ((u[-1,:]-u[-2,:])/dxi)# rear diff at right boundary only
+
+    dvdx[0:-1,:] = ((v[1:,:]-v[0:-1,:])/dxi)#fwd diff
+    dvdx[-1,:] = ((v[-1,:]-v[-2,:])/dxi)# rear diff at right boundary only
+
+    dudy[:,1:-1] = ((u[:,2:]-u[:,0:-2])/(2*deta)) #central diff
+    dudy[:,0] = ((u[:,1]-u[:,0])/(deta)) #fwd diff at boundary only
+    dudy[:,-1] = ((u[:,-1]-u[:,-2])/(deta)) #rear diff at boundary only
+
+    dvdy[:,1:-1] = ((v[:,2:]-v[:,0:-2])/(2*deta)) #central diff
+    dvdy[:,0] = ((v[:,1]-v[:,0])/(deta)) #fwd diff at boundary only
+    dvdy[:,-1] = ((v[:,-1]-v[:,-2])/(deta)) #rear diff at boundary only
+
+    tauxx = ((2*mu)/(3*Reh))*(2*dudx-dvdy)
+    tauxy =  (mu/Reh)*(dudy+dvdx)
+
     return tauxx, tauxy
 
 def viscous_pred_F(grid,flow):
+    dudx = np.empty((grid['x_div'], grid['y_div']))
+    dudy = np.empty((grid['x_div'], grid['y_div']))
+    dvdx = np.empty((grid['x_div'], grid['y_div']))
+    dvdy = np.empty((grid['x_div'], grid['y_div']))
     u = flow['u']
     v = flow['v']
     mu = flow['mu']
     Reh = flow['Reh']
     dxi = grid['dx']
     deta = grid['dy']
-    tauxy = (mu[1:-1,1:-1]/Reh)*(((u[1:-1,1:-1]-u[1:-1,0:-2])/(deta))+((v[2:,1:-1]-v[0:-2,1:-1])/(2*dxi)))
-    tauyy = ((2*mu[1:-1,1:-1])/(3*Reh))*(2*((v[1:-1,1:-1]-v[1:-1,0:-2])/(deta))-((u[2:,1:-1]-u[0:-2,1:-1])/(2*dxi)))
+
+    dudx[1:-1,:] = ((u[2:,:]-u[0:-2,:])/(2*dxi)) #central diff
+    dudx[0,:] = ((u[1,:]-u[0,:])/(dxi)) #fwd diff at boundary only
+    dudx[-1,:] = ((u[-1,:]-u[-2,:])/(dxi)) #rear diff at boundary only
+
+    dvdx[1:-1,:] = ((v[2:,:]-v[0:-2,:])/(2*dxi)) #central diff
+    dvdx[0,:] = ((v[1,:]-v[0,:])/(dxi)) #fwd diff at boundary only
+    dvdx[-1,:] = ((v[-1,:]-v[-2,:])/(dxi)) #rear diff at boundary only
+
+    dudy[:,1:] = ((u[:,1:]-u[:,0:-1])/deta)#rear diff
+    dudy[:,0] = ((u[:,1]-u[:,0])/deta)# fwd diff at bottom boundary only
+
+    dvdy[:,1:] = ((v[:,1:]-v[:,0:-1])/deta)#rear diff
+    dvdy[:,0] = ((v[:,1]-v[:,0])/deta)# fwd diff at bottom boundary only
+
+    tauxy =  (mu/Reh)*(dudy+dvdx)
+    tauyy =  ((2*mu)/(3*Reh))*(2*dvdy-dudx)
+
     return tauxy, tauyy
 
 def viscous_corr_F(grid,flow):
+    dudx = np.empty((grid['x_div'], grid['y_div']))
+    dudy = np.empty((grid['x_div'], grid['y_div']))
+    dvdx = np.empty((grid['x_div'], grid['y_div']))
+    dvdy = np.empty((grid['x_div'], grid['y_div']))
     u = flow['u']
     v = flow['v']
     mu = flow['mu']
     Reh = flow['Reh']
     dxi = grid['dx']
     deta = grid['dy']
-    tauxy = (mu[1:-1,1:-1]/Reh)*(((u[1:-1,2:]-u[1:-1,1:-1])/(deta))+((v[2:,1:-1]-v[0:-2,1:-1])/(2*dxi)))
-    tauyy = ((2*mu[1:-1,1:-1])/(3*Reh))*(2*((v[1:-1,2:]-v[1:-1,1:-1])/(deta))-((u[2:,1:-1]-u[0:-2,1:-1])/(2*dxi)))
+
+    dudx[1:-1,:] = ((u[2:,:]-u[0:-2,:])/(2*dxi)) #central diff
+    dudx[0,:] = ((u[1,:]-u[0,:])/(dxi)) #fwd diff at boundary only
+    dudx[-1,:] = ((u[-1,:]-u[-2,:])/(dxi)) #rear diff at boundary only
+
+    dvdx[1:-1,:] = ((v[2:,:]-v[0:-2,:])/(2*dxi)) #central diff
+    dvdx[0,:] = ((v[1,:]-v[0,:])/(dxi)) #fwd diff at boundary only
+    dvdx[-1,:] = ((v[-1,:]-v[-2,:])/(dxi)) #rear diff at boundary only
+
+    dudy[:,0:-1] = ((u[:,1:]-u[:,0:-1])/deta)#fwd diff
+    dudy[:,-1] = ((u[:,-1]-u[:,-2])/deta)# rear diff at top boundary only
+
+    dvdy[:,0:-1] = ((v[:,1:]-v[:,0:-1])/deta)#fwd diff
+    dvdy[:,-1] = ((v[:,-1]-v[:,-2])/deta)# rear diff at top boundary only
+
+    tauxy =  (mu/Reh)*(dudy+dvdx)
+    tauyy =  ((2*mu)/(3*Reh))*(2*dvdy-dudx)
+
     return tauxy, tauyy
 
 def encode_U(flow,grid):
@@ -179,8 +261,8 @@ def encode_E(flow,qE,tauxx,tauxy_E,grid):
     T = flow['T']
     E1 = rho*u
     E2 = rho*u**2+p-tauxx
-    E3 = rho*u*v-tauxy
-    E4 = (rho*(T+(u**2+v**2)/2)+p)*u+qE-u*tauxx-v*tauxy
+    E3 = rho*u*v-tauxy_E
+    E4 = (rho*(T+(u**2+v**2)/2)+p)*u+qE-u*tauxx-v*tauxy_E
     E[:, :, 0] = E1
     E[:, :, 1] = E2
     E[:, :, 2] = E3
@@ -195,49 +277,73 @@ def encode_F(flow,qF,tauxy_F,tauyy,grid):
     p = flow['p']
     T = flow['T']
     F1 = rho*v
-    F2 = rho*u*v-tauxy
+    F2 = rho*u*v-tauxy_F
     F3 = rho*v**2+p-tauyy
-    F4 = (rho*(T+(u**2+v**2)/2)+p)*v+qF-u*tauxy-v*tauyy
+    F4 = (rho*(T+(u**2+v**2)/2)+p)*v+qF-u*tauxy_F-v*tauyy
     return F
 
 def heat_trans_pred_E(grid,flow):
+    dTdx = np.empty((grid['x_div'], grid['y_div']))
     mu = flow['mu']
     M = flow['M']
     Reh = flow['Reh']
     Pr = flow['Pr']
     g = flow['g']
     T = flow['T']
-    qE = (-mu[1:-1,1:-1]/((g-1)*M**2*Reh*Pr))*((T[1:-1,1:-1]-T[0:-2,1:-1])/grid['dx'])
+    dx = grid['dx']
+
+    dTdx[1:,:] = ((T[1:,:]-T[0:-1,:])/dx)#rear diff
+    dTdx[0,:] = ((T[1,:]-T[0,:])/dx)# fwd diff at left boundary only
+    qE = (-mu/((g-1)*M**2*Reh*Pr))*dTdx
+
     return qE
 
 def heat_trans_corr_E(grid,flow):
+    dTdx = np.empty((grid['x_div'], grid['y_div']))
     mu = flow['mu']
     M = flow['M']
     Reh = flow['Reh']
     Pr = flow['Pr']
     g = flow['g']
     T = flow['T']
-    qE = (-mu[1:-1,1:-1]/((g-1)*M**2*Reh*Pr))*((T[2:,1:-1]-T[1:-1,1:-1])/grid['dx'])
+    dx = grid['dx']
+
+    dTdx[0:-1,:] = ((T[1:,:]-T[0:-1,:])/dx)#fwd diff
+    dTdx[-1,:] = ((T[-1,:]-T[-2,:])/dx)# rear diff at right boundary only
+    qE = (-mu/((g-1)*M**2*Reh*Pr))*dTdx
+
     return qE
 
 def heat_trans_pred_F(grid,flow):
+    dTdy = np.empty((grid['x_div'], grid['y_div']))
     mu = flow['mu']
     M = flow['M']
     Reh = flow['Reh']
     Pr = flow['Pr']
     g = flow['g']
     T = flow['T']
-    qF = (-mu[1:-1,1:-1]/((g-1)*M**2*Reh*Pr))*((T[1:-1,1:-1]-T[1:-1,0:-2])/grid['dy'])
+    dy = grid['dy']
+
+    dTdy[:,1:] = ((T[:,1:]-T[:,0:-1])/dy)#rear diff
+    dTdy[:,0] = ((T[:,1]-T[:,0])/dy)# fwd diff at bottom boundary only
+    qF = (-mu/((g-1)*M**2*Reh*Pr))*dTdy
+
     return qF
 
 def heat_trans_corr_F(grid,flow):
+    dTdy = np.empty((grid['x_div'], grid['y_div']))
     mu = flow['mu']
     M = flow['M']
     Reh = flow['Reh']
     Pr = flow['Pr']
     g = flow['g']
     T = flow['T']
-    qF = (-mu[1:-1,1:-1]/((g-1)*M**2*Reh*Pr))*((T[1:-1,2:]-T[1:-1,1:-1])/grid['dy'])
+    dy = grid['dy']
+
+    dTdy[:,0:-1] = ((T[:,1:]-T[:,0:-1])/dy)#fwd diff
+    dTdy[:,-1] = ((T[:,-1]-T[:,-2])/dy)# rear diff at top boundary only
+    qF = (-mu/((g-1)*M**2*Reh*Pr))*dTdy
+
     return qF
 
 def decode_U(U,flow):
@@ -277,7 +383,7 @@ def update_BC(grid,flow):
     dy = grid['dy']
 
     #Upper Wall
-    u[:,-1] = 0
+    u[:,-1] = 1
     v[:,-1] = 0
     p[:,-1] = p[:,-2]+((2*mu[:,-1])/(3*Reh*dy))*(v[:,-1]-2*v[:,-2]+v[:,-3])
     T[:,-1] = 1
@@ -322,12 +428,24 @@ def update_dynvis(flow):
 
 def convergence(flow,flow_final):
     delta_rho = np.abs(flow_final['rho']-flow['rho'])
-    current = np.max(delta_rho)
-    if delta_rho <= 1.0e-8:
+    current = 2.375e-3*np.max(delta_rho)
+    if current <= 1.0e-8:
         status=True
     else:
         status=False
     return status, current
+
+def save_results(flow,config):
+    with open('{0}_rho.dat'.format(config['Name']),'wb') as f:
+        np.save(f, flow['rho'])
+    with open('{0}_u.dat'.format(config['Name']),'wb') as f:
+        np.save(f, flow['u'])
+    with open('{0}_v.dat'.format(config['Name']),'wb') as f:
+        np.save(f, flow['v'])
+    with open('{0}_p.dat'.format(config['Name']),'wb') as f:
+        np.save(f, flow['p'])
+    with open('{0}_T.dat'.format(config['Name']),'wb') as f:
+        np.save(f, flow['T'])
 
 def main():
     configs = read_config('config.csv')
@@ -345,6 +463,10 @@ def main():
                 firstrun=False
             flow_pred = mac_predictor(grid,flow,dt)
             flow_pred = update_BC(grid,flow_pred)
+            ###
+            save_results(flow_pred,config)
+            pdb.set_trace()
+            ###
             flow_pred = update_dynvis(flow_pred)
             flow_corr = mac_corrector(grid,flow_pred,dt)
             flow_corr = update_BC(grid,flow_corr)
@@ -352,23 +474,25 @@ def main():
             flow_final = mac_combine(grid,flow_pred,flow_corr)
             flow_final = update_BC(grid,flow_final)
             flow_final = update_dynvis(flow_final)
-            converged,current = convergence(flow,flow_final)
+            #converged,current = convergence(flow,flow_final)
             flow = flow_final
-            if i >=500:
-                print("Current max delta_rho is {0}\n".format(current))
+            if i >=50:
+                #print("Current max delta_rho is {0}\n".format(current))
                 i=0
+                save_results(flow,config)
+                pdb.set_trace()
             else:
                 i+=1
-        with open('{0}_rho.dat'.format(config['Name']),'wb') as f:
-            np.save(f, flow['rho'])
-        with open('{0}_u.dat'.format(config['Name']),'wb') as f:
-            np.save(f, flow['u'])
-        with open('{0}_v.dat'.format(config['Name']),'wb') as f:
-            np.save(f, flow['v'])
-        with open('{0}_p.dat'.format(config['Name']),'wb') as f:
-            np.save(f, flow['p'])
-        with open('{0}_T.dat'.format(config['Name']),'wb') as f:
-            np.save(f, flow['T'])
+        #with open('{0}_rho.dat'.format(config['Name']),'wb') as f:
+        #    np.save(f, flow['rho'])
+        #with open('{0}_u.dat'.format(config['Name']),'wb') as f:
+        #    np.save(f, flow['u'])
+        #with open('{0}_v.dat'.format(config['Name']),'wb') as f:
+        #    np.save(f, flow['v'])
+        #with open('{0}_p.dat'.format(config['Name']),'wb') as f:
+        #    np.save(f, flow['p'])
+        #with open('{0}_T.dat'.format(config['Name']),'wb') as f:
+        #    np.save(f, flow['T'])
 
 if __name__ == '__main__':
     main()

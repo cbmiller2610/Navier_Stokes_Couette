@@ -164,3 +164,6 @@ ffmpeg-6.1-amd64-static/
 
 #vim
 *.swp
+
+#Numpy
+*.dat
