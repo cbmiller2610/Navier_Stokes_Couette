@@ -39,9 +39,9 @@ def init_grid(config):
 
     #Initial Conditions
     rho = np.ones((x_div,y_div))
-    u = np.full((x_div,y_div),0.001)
+    u = np.full((x_div,y_div),0)
     u[:,-1] = np.ones(x_div)
-    v = np.full((x_div,y_div),0.001)
+    v = np.full((x_div,y_div),0)
     T = np.ones((x_div,y_div))
     p = rho*T
     mu = np.ones((x_div,y_div))
@@ -72,7 +72,7 @@ def calc_tstep(grid,flow):
     Re_min = np.minimum(Rex,Rey)
 
     dt = np.min((sigma*dt_CFL[1:-1,1:-1])/(1+2/Re_min[1:-1,1:-1]))
-    dt = 0.01
+    #dt = 0.01
     return dt
 
 def mac_predictor(grid,flow,dt):
@@ -280,6 +280,10 @@ def encode_F(flow,qF,tauxy_F,tauyy,grid):
     F2 = rho*u*v-tauxy_F
     F3 = rho*v**2+p-tauyy
     F4 = (rho*(T+(u**2+v**2)/2)+p)*v+qF-u*tauxy_F-v*tauyy
+    F[:, :, 0] = F1
+    F[:, :, 1] = F2
+    F[:, :, 2] = F3
+    F[:, :, 3] = F4
     return F
 
 def heat_trans_pred_E(grid,flow):
