@@ -39,9 +39,9 @@ def init_grid(config):
 
     #Initial Conditions
     rho = np.ones((x_div,y_div))
-    u = np.full((x_div,y_div),0)
+    u = np.full((x_div,y_div),0.001)
     u[:,-1] = np.ones(x_div)
-    v = np.full((x_div,y_div),0)
+    v = np.full((x_div,y_div),0.001)
     T = np.ones((x_div,y_div))
     p = rho*T
     mu = np.ones((x_div,y_div))
@@ -87,8 +87,7 @@ def mac_predictor(grid,flow,dt):
     U_np_3D[1:-1,1:-1,:] = (U_np_3D[1:-1, 1:-1, :]
                             - (dt / grid['dx']) * (E_np_3D[2:, 1:-1, :] - E_np_3D[1:-1, 1:-1, :])
                             - (dt / grid['dy']) * (F_np_3D[1:-1, 2:, :] - F_np_3D[1:-1, 1:-1, :]))
-    print("in pred")
-    pdb.set_trace()
+    
     flow_out = decode_U(U_np_3D,flow)
     return flow_out
 
@@ -467,10 +466,6 @@ def main():
                 firstrun=False
             flow_pred = mac_predictor(grid,flow,dt)
             flow_pred = update_BC(grid,flow_pred)
-            ###
-            save_results(flow_pred,config)
-            pdb.set_trace()
-            ###
             flow_pred = update_dynvis(flow_pred)
             flow_corr = mac_corrector(grid,flow_pred,dt)
             flow_corr = update_BC(grid,flow_corr)
@@ -487,16 +482,6 @@ def main():
                 pdb.set_trace()
             else:
                 i+=1
-        #with open('{0}_rho.dat'.format(config['Name']),'wb') as f:
-        #    np.save(f, flow['rho'])
-        #with open('{0}_u.dat'.format(config['Name']),'wb') as f:
-        #    np.save(f, flow['u'])
-        #with open('{0}_v.dat'.format(config['Name']),'wb') as f:
-        #    np.save(f, flow['v'])
-        #with open('{0}_p.dat'.format(config['Name']),'wb') as f:
-        #    np.save(f, flow['p'])
-        #with open('{0}_T.dat'.format(config['Name']),'wb') as f:
-        #    np.save(f, flow['T'])
 
 if __name__ == '__main__':
     main()
