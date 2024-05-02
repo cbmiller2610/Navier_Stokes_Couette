@@ -43,13 +43,15 @@ def init_grid(config):
     u[:,-1] = np.ones(x_div)
     v = np.full((x_div,y_div),0.001)
     T = np.ones((x_div,y_div))
-    p = rho*T
+    e = T/(g*(M**2)*(g-1))
+    p = (g-1)*rho*e
     mu = np.ones((x_div,y_div))
 
     flow = {'rho':rho,
             'u':u,
             'v':v,
             'T':T,
+            'e':e,
             'p':p,
             'mu':mu,
             'Reh':Reh,
@@ -64,14 +66,16 @@ def calc_tstep(grid,flow):
     a = np.sqrt((flow['g']*flow['p'])/flow['rho'])
     dt_CFL = (
             (abs(flow['u'])/grid['dx']) + (abs(flow['v'])/grid['dy'])+
-            a*np.sqrt((1/grid['dx']**2) + (1/grid['dy']**2))
+            a*np.sqrt((1/(grid['dx']**2)) + (1/(grid['dy']**2)))
             )
     Rex = (flow['rho']*abs(flow['u'])*grid['dx'])/flow['mu']
     Rey = (flow['rho']*abs(flow['v'])*grid['dy'])/flow['mu']
 
-    Re_min = np.minimum(Rex,Rey)
+    Re_min = np.minimum(Rex[1:-1,1:-1],Rey[1:-1,1:-1])
 
-    dt = np.min((sigma*dt_CFL[1:-1,1:-1])/(1+2/Re_min[1:-1,1:-1]))
+    dt = np.min((sigma*dt_CFL[1:-1,1:-1])/(1+2/Re_min))
+    #pdb.set_trace()
+    dt = 0.0001
     #dt = 0.01
     return dt
 
@@ -91,19 +95,21 @@ def mac_predictor(grid,flow,dt):
     flow_out = decode_U(U_np_3D,flow)
     return flow_out
 
-def mac_corrector(grid,flow,dt):
-    U_np_3D = encode_U(flow,grid)
-    qE = heat_trans_corr_E(grid,flow)
-    qF = heat_trans_corr_F(grid,flow)
-    tauxx,tauxy_E = viscous_corr_E(grid,flow)
-    tauxy_F,tauyy = viscous_corr_F(grid,flow)
-    E_np_3D = encode_E(flow,qE,tauxx,tauxy_E,grid)
-    F_np_3D = encode_F(flow,qF,tauxy_F,tauyy,grid)
+def mac_corrector(grid,flow,flow_pred,dt):
+    U_corr = np.empty((grid['x_div'], grid['y_div'],4))
+    U_pred = encode_U(flow_pred,grid)
+    U_init = encode_U(flow,grid)
+    qE = heat_trans_corr_E(grid,flow_pred)
+    qF = heat_trans_corr_F(grid,flow_pred)
+    tauxx,tauxy_E = viscous_corr_E(grid,flow_pred)
+    tauxy_F,tauyy = viscous_corr_F(grid,flow_pred)
+    E_np_3D = encode_E(flow_pred,qE,tauxx,tauxy_E,grid)
+    F_np_3D = encode_F(flow_pred,qF,tauxy_F,tauyy,grid)
 
-    U_np_3D[1:-1,1:-1,:] = (U_np_3D[1:-1, 1:-1, :]
+    U_corr[1:-1,1:-1,:] = 0.5*(U_init[1:-1,1:-1,:] + U_pred[1:-1, 1:-1, :]
                                  - (dt / grid['dx']) * (E_np_3D[1:-1, 1:-1, :] - E_np_3D[0:-2, 1:-1, :])
                                  - (dt / grid['dy']) * (F_np_3D[1:-1, 1:-1, :] - F_np_3D[1:-1, 0:-2, :]))
-    flow_out = decode_U(U_np_3D,flow)
+    flow_out = decode_U(U_corr,flow)
     return flow_out
 
 def mac_combine(grid,flow_pred,flow_corr):
@@ -244,7 +250,7 @@ def encode_U(flow,grid):
     U1 = flow['rho']
     U2 = flow['rho']*flow['u']
     U3 = flow['rho']*flow['v']
-    U4 = flow['rho']*(flow['T']+(flow['u']**2+flow['v']**2)/2)
+    U4 = flow['rho']*(flow['e']+(flow['u']**2+flow['v']**2)/2)
     U[:, :, 0] = U1
     U[:, :, 1] = U2
     U[:, :, 2] = U3
@@ -257,11 +263,11 @@ def encode_E(flow,qE,tauxx,tauxy_E,grid):
     u = flow['u']
     v = flow['v']
     p = flow['p']
-    T = flow['T']
+    e = flow['e']
     E1 = rho*u
     E2 = rho*u**2+p-tauxx
     E3 = rho*u*v-tauxy_E
-    E4 = (rho*(T+(u**2+v**2)/2)+p)*u+qE-u*tauxx-v*tauxy_E
+    E4 = (rho*(e+(u**2+v**2)/2)+p)*u+qE-u*tauxx-v*tauxy_E
     E[:, :, 0] = E1
     E[:, :, 1] = E2
     E[:, :, 2] = E3
@@ -274,11 +280,11 @@ def encode_F(flow,qF,tauxy_F,tauyy,grid):
     u = flow['u']
     v = flow['v']
     p = flow['p']
-    T = flow['T']
+    e = flow['e']
     F1 = rho*v
     F2 = rho*u*v-tauxy_F
     F3 = rho*v**2+p-tauyy
-    F4 = (rho*(T+(u**2+v**2)/2)+p)*v+qF-u*tauxy_F-v*tauyy
+    F4 = (rho*(e+(u**2+v**2)/2)+p)*v+qF-u*tauxy_F-v*tauyy
     F[:, :, 0] = F1
     F[:, :, 1] = F2
     F[:, :, 2] = F3
@@ -359,17 +365,21 @@ def decode_U(U,flow):
     v = flow['v']
     p = flow['p']
     T = flow['T']
+    e = flow['e']
     g = flow['g']
+    M = flow['M']
 
     rho[1:-1,1:-1] = U1
     u[1:-1,1:-1] = U2/U1
     v[1:-1,1:-1] = U3/U1
-    T[1:-1,1:-1] = U4/U1-0.5*((U2/U1)**2+(U3/U1)**2)
+    e[1:-1,1:-1] = U4/U1-0.5*((U2/U1)**2+(U3/U1)**2)
     p[1:-1,1:-1] = (g-1)*(U4-0.5*((U2**2)/U1+(U3**2)/U1))
+    T[1:-1,1:-1] = g*M**2*(g-1)*e[1:-1,1:-1]
 
     flow['rho']=rho
     flow['u']=u
     flow['v']=v
+    flow['e']=e
     flow['T']=T
     flow['p']=p
 
@@ -381,8 +391,11 @@ def update_BC(grid,flow):
     v = flow['v']
     p = flow['p']
     T = flow['T']
+    e = flow['e']
     mu = flow['mu']
     Reh = flow['Reh']
+    g = flow['g']
+    M = flow['M']
     dy = grid['dy']
 
     #Upper Wall
@@ -409,14 +422,16 @@ def update_BC(grid,flow):
     p[0,1:-1] = 2*p[1,1:-1]-p[2,1:-1]
     T[0,1:-1] = 2*T[1,1:-1]-T[2,1:-1]
 
-    #update rho
-    rho = p/T
+    #update rho and e
+    e = T/(g*M**2*(g-1))
+    rho = p/(e*(g-1))
 
     flow['rho']=rho
     flow['u']=u
     flow['v']=v
     flow['T']=T
     flow['p']=p
+    flow['e']=e
 
     return flow
 
@@ -449,7 +464,10 @@ def save_results(flow,config):
         np.save(f, flow['p'])
     with open('{0}_T.dat'.format(config['Name']),'wb') as f:
         np.save(f, flow['T'])
-
+    with open('{0}_e.dat'.format(config['Name']),'wb') as f:
+        np.save(f, flow['e'])
+    with open('{0}_mu.dat'.format(config['Name']),'wb') as f:
+        np.save(f, flow['mu'])
 def main():
     configs = read_config('config.csv')
 
@@ -461,27 +479,30 @@ def main():
         while converged==False:
             #calculate timestep
             dt = calc_tstep(grid,flow)
-            if firstrun==True:
-                print("The initial time step is {0}\n".format(dt))
-                firstrun=False
+            #if firstrun==True:
+            print("The time step is {0}\n".format(dt))
+            #    firstrun=False
             flow_pred = mac_predictor(grid,flow,dt)
+            pdb.set_trace()
             flow_pred = update_BC(grid,flow_pred)
+            pdb.set_trace()
             flow_pred = update_dynvis(flow_pred)
-            flow_corr = mac_corrector(grid,flow_pred,dt)
+            pdb.set_trace()
+            flow_corr = mac_corrector(grid,flow,flow_pred,dt)
+            pdb.set_trace()
             flow_corr = update_BC(grid,flow_corr)
+            pdb.set_trace()
             flow_corr = update_dynvis(flow_corr)
-            flow_final = mac_combine(grid,flow_pred,flow_corr)
-            flow_final = update_BC(grid,flow_final)
-            flow_final = update_dynvis(flow_final)
-            #converged,current = convergence(flow,flow_final)
-            flow = flow_final
-            if i >=50:
-                #print("Current max delta_rho is {0}\n".format(current))
+            pdb.set_trace()
+            converged,current = convergence(flow,flow_corr)
+            flow = flow_corr
+            print("Current max delta_rho is {0}\n".format(current))
+            if i >=500:
                 i=0
-                save_results(flow,config)
                 pdb.set_trace()
+                save_results(flow,config)
             else:
                 i+=1
-
+        save_results(flow,config)
 if __name__ == '__main__':
     main()
